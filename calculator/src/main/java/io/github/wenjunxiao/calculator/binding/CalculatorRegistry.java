@@ -1,5 +1,6 @@
 package io.github.wenjunxiao.calculator.binding;
 
+import java.lang.reflect.Modifier;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -34,7 +35,7 @@ public class CalculatorRegistry {
   }
 
   public <T> void addCalculator(Class<T> type) {
-    if (type.isInterface()) {
+    if (type.isInterface() || Modifier.isAbstract(type.getModifiers())) {
       if (hasCalculator(type)) {
         throw new BindingException("Type " + type + " is already known to the CalculatorRegistry.");
       }

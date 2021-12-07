@@ -7,6 +7,7 @@ import org.springframework.beans.factory.config.BeanDefinitionHolder;
 import org.springframework.beans.factory.support.BeanDefinitionRegistry;
 import org.springframework.beans.factory.support.GenericBeanDefinition;
 import org.springframework.context.annotation.ClassPathBeanDefinitionScanner;
+import org.springframework.core.type.AnnotationMetadata;
 
 import java.util.Set;
 
@@ -24,7 +25,8 @@ public class ClassPathCalculatorScanner extends ClassPathBeanDefinitionScanner {
 
   @Override
   protected boolean isCandidateComponent(AnnotatedBeanDefinition beanDefinition) {
-    return beanDefinition.getMetadata().isInterface();
+    AnnotationMetadata metadata = beanDefinition.getMetadata();
+    return metadata.isIndependent() && (metadata.isInterface() || metadata.isAbstract());
   }
 
   @Override

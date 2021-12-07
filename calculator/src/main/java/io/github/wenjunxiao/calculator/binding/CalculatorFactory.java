@@ -44,6 +44,7 @@ public class CalculatorFactory<T> {
     this.calculatorInterface = calculatorInterface;
   }
 
+  @SuppressWarnings("unused")
   public void setDebug(boolean debug) {
     this.debug = debug;
   }
@@ -51,6 +52,9 @@ public class CalculatorFactory<T> {
   private CtClass makeClass(ClassPool pool, Class<?> clazz, Calculator calculator) throws NotFoundException {
     String name = clazz.getName() + "Impl";
     Class<?> extend = calculator == null ? null : calculator.extend();
+    if (!clazz.isInterface()) {
+      extend = clazz;
+    }
     if (extend == null && ICalculator.class.isAssignableFrom(clazz)) {
       extend = DefaultCalculator.class;
     }
@@ -96,7 +100,9 @@ public class CalculatorFactory<T> {
       }
     }
     CtClass ctClass = makeClass(pool, calculatorInterface, calculator);
-    ctClass.addInterface(pool.get(calculatorInterface.getName()));
+    if (calculatorInterface.isInterface()) {
+      ctClass.addInterface(pool.get(calculatorInterface.getName()));
+    }
     Map<String, String> methodMap = new HashMap<>();
     if (calculator != null && calculator.extend() != null) {
       for (Method method : calculator.extend().getMethods()) {
@@ -136,8 +142,7 @@ public class CalculatorFactory<T> {
         } else if (Double.TYPE.equals(type)) {
           target = "BigDecimal.valueOf" + OPEN + target + CLOSE;
         }
-        expr = expr.replace("%", "/100")
-                .replaceAll("(^|[\\s+\\-*/(,])" + name + "($|[\\s+\\-*/(),])", "$1" + target + "$2");
+        expr = expr.replaceAll("(^|[\\s+\\-*/(,])(?:#\\{\\s*)?" + name + "(?:\\s*})?($|[\\s+\\-*/(),])", "$1" + target + "$2").replace("%", "/100");
         parameters[i] = pool.get(type.getName());
       }
       Class<?> type = method.getReturnType();
@@ -156,7 +161,7 @@ public class CalculatorFactory<T> {
       try {
         ctMethod.setBody("{\nreturn " + body + ";\n}");
       } catch (CannotCompileException e) {
-        throw new CannotCompileException(fullMethod(method, body), e);
+        throw new CannotCompileException(expr + "\n"+ fullMethod(method, body), e);
       }
       if (debug || eval.debug()) {
         System.err.println(calculatorInterface.getName() + "." + method.getName() + " => " + fullMethod(method, body));
@@ -189,13 +194,13 @@ public class CalculatorFactory<T> {
 
   public String compile(String expr, Context context) {
     expr = markFunction(expr);
-    Pattern group = Pattern.compile("(^|[-+*/<>_,\\s])\\(\\s*([^()]+)(\\s*\\)\\s*)");
+    Pattern group = Pattern.compile("(^|[-+*/<>_,\\s])\\(\\s*([^()]+)(\\s*\\)\\s*)(\\{[\\w,+-]+})?");
     Matcher matcher = group.matcher(expr);
     while (matcher.find()) {
-      expr = expr.substring(0, matcher.end(1)) + compileGroup(matcher.group(2), context) + expr.substring(matcher.end(3));
+      expr = expr.substring(0, matcher.end(1)) + compileGroup(matcher.group(2), matcher.group(4), context) + expr.substring(matcher.end());
       matcher = group.matcher(expr);
     }
-    expr = compileGroup(expr, context);
+    expr = compileGroup(expr, "", context);
     if (context.getMode() != RoundingMode.UNNECESSARY) {
       expr += ".setScale(" + context.getScale() + ", RoundingMode." + context.getMode().name() + ")";
     } else if (context.getScale() != Integer.MAX_VALUE) {
@@ -204,7 +209,7 @@ public class CalculatorFactory<T> {
     return restoreFunction(expr);
   }
 
-  private String compileGroup(String expr, Context context) {
+  private String compileGroup(String expr, String cfg, Context context) {
     expr = expr.trim();
     Pattern op = Pattern.compile("\\s*([^+-]+)([+-]|$)");
     List<String> res = new ArrayList<>();
@@ -225,7 +230,45 @@ public class CalculatorFactory<T> {
       expr = expr.substring(matcher.end(2)).trim();
       matcher = op.matcher(expr);
     }
+    if (cfg != null && !cfg.isEmpty()) {
+      String scale = cfg.replaceAll("^\\{\\s*([+-]?\\d+).*$", "$1");
+      String mode = mapMode(cfg.replaceAll("^\\{\\s*[+-]?\\d+,?(.*)\\}$", "$1"));
+      res.add(".setScale");
+      res.add(OPEN);
+      res.add(scale);
+      res.add(",");
+      res.add(mode);
+      res.add(CLOSE);
+    }
     return String.join("", res);
+  }
+
+  private String mapMode(String mode) {
+    switch (mode.toUpperCase()) {
+      case "U":
+      case "UP":
+        return "RoundingMode.UP";
+      case "D":
+      case "DOWN":
+        return "RoundingMode.DOWN";
+      case "HU":
+      case "HALF_UP":
+        return "RoundingMode.HALF_UP";
+      case "HD":
+      case "HALF_DOWN":
+        return "RoundingMode.HALF_DOWN";
+      case "E":
+      case "EVEN":
+      case "HALF_EVEN":
+        return "RoundingMode.HALF_EVEN";
+      case "C":
+      case "CEILING":
+        return "RoundingMode.CEILING";
+      case "F":
+      case "FLOOR":
+        return "RoundingMode.FLOOR";
+    }
+    throw new BindingException("Unknown mode flag: " + mode);
   }
 
   private String mulOrDiv(String expr, Context context) {
@@ -321,5 +364,9 @@ public class CalculatorFactory<T> {
     } catch (Exception e) {
       throw new BindingException(e);
     }
+  }
+
+  public static <T> T newInstance(Class<T> clazz) {
+    return new CalculatorFactory<T>(clazz).newInstance();
   }
 }
